@@ -23,6 +23,8 @@ GitHub runner 不能访问你本机的 Dalamud 和 PromeRotation 目录，所以
 
 注意：这里生成的 `repo.json` 是 PromeRotation 远程 ACR 下载清单格式，不是 Dalamud 插件仓库格式。`referencePromeVersion` 会从 `lib/PromeRotation.dll` 自动读取，`sha256` 会根据本次生成的 `latest.zip` 自动计算。
 
+发布时，workflow 会把 `Bard/BardRotation.cs` 里的 `RotationMetadata` 版本临时同步为 tag 版本，确保包内 Metadata Version 和 `repo.json` 的 `version` 一致。
+
 ## 触发发布
 
 推送 tag：
