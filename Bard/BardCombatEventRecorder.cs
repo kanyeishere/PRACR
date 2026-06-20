@@ -8,9 +8,6 @@ public static class BardCombatEventRecorder
 {
     public static void ResetBattleState()
     {
-        if (BardSettings.Instance.ResetSongOrder)
-            BardSettings.Instance.ResetSongOrderCustom();
-
         BardBattleData.Instance.ResetForBattle();
     }
 

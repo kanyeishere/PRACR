@@ -14,14 +14,6 @@ public class BardSettings
     public Song SecondSong { get; set; } = Song.MagesBallad;
     public Song ThirdSong { get; set; } = Song.ArmysPaeon;
 
-    public bool ResetSongOrder { get; set; } = true;
-    public List<Song> SongOrderOnReset { get; set; } =
-    [
-        Song.WanderersMinuet,
-        Song.MagesBallad,
-        Song.ArmysPaeon
-    ];
-
     public int WandererBeforeGcdTime { get; set; } = 750;
 
     public int UseBattleVoiceBeforeGcdTimeInMs { get; set; } = 1350;
@@ -43,35 +35,11 @@ public class BardSettings
     public bool ApplyDotOnTrashMobs { get; set; } = false;
 
     public float HeartBreakSaveStack { get; set; } = 0f;
-
-    public void ResetSongOrderCustom()
-    {
-        if (SongOrderOnReset.Count >= 3)
-        {
-            FirstSong = SongOrderOnReset[0];
-            SecondSong = SongOrderOnReset[1];
-            ThirdSong = SongOrderOnReset[2];
-            return;
-        }
-
-        ResetSongOrderNormal();
-    }
-
+    
     public void ResetSongOrderNormal()
     {
         FirstSong = Song.WanderersMinuet;
         SecondSong = Song.MagesBallad;
         ThirdSong = Song.ArmysPaeon;
-        SyncSongOrderOnReset();
-    }
-
-    public void SyncSongOrderOnReset()
-    {
-        SongOrderOnReset =
-        [
-            FirstSong,
-            SecondSong,
-            ThirdSong
-        ];
     }
 }

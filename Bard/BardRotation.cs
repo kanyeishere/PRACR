@@ -8,13 +8,10 @@ using PromeRotation.Helpers;
 using PromeRotation.Managers;
 using PromeRotation.Resolvers;
 using PromeRotation.Rotation;
-using Wotou.Bard;
 using Wotou.Bard.Action;
 using Wotou.Bard.Data;
 using Wotou.Bard.Opener;
-using PromeRotation.UI;
 using PromeRotation.UI.HotKey;
-using PromeRotation.UI.Hotkeys;
 
 namespace Wotou.Bard;
 
@@ -28,11 +25,14 @@ public class BardRotation : IRotation
    // public IRotationEventHandler GetEventHandler() => _eventHandler;
 
     private readonly List<IDecisionResolver> _gcdResolvers = new();
+    private static HotkeyPanel _panel = null!;
     private readonly List<IDecisionResolver> _offGcdResolvers = new();
 
     public BardRotation()
     {
         _offGcdResolvers.Add(new BardPotionOffGcd());
+        _offGcdResolvers.Add(new BardWardensPaeanOffGcd());
+        _offGcdResolvers.Add(new BardNaturesMinneOffGcd());
         _offGcdResolvers.Add(new BardRadiantFinaleOffGcd());
         _offGcdResolvers.Add(new BardRagingStrikesOffGcd());
         _offGcdResolvers.Add(new BardBattleVoiceOffGcd());
@@ -63,40 +63,25 @@ public class BardRotation : IRotation
         foreach (var (name, def) in QtList)
             PromeSettings.Instance.AddQt(name, def);
 
-        RegisterHotkeys();
+        SetupHotkeyPanel();
     }
 
-    private static void RegisterHotkeys()
+    private static void SetupHotkeyPanel()
     {
-        HotkeyUI.AddHotkey(new ActionHotkey(new PAction(BRDSkill.ArmsLength, ActionType.OffGcd, ActionTargetType.Self)));
-        HotkeyUI.AddHotkey(new ActionHotkey(new PAction(BRDSkill.IronJaws, ActionType.Gcd, ActionTargetType.Target)));
-        HotkeyUI.AddHotkey(new ActionHotkey(new PAction(BRDSkill.SecondWind, ActionType.OffGcd, ActionTargetType.Self)));
-        HotkeyUI.AddHotkey(new ActionHotkey(new PAction(BRDSkill.Troubadour, ActionType.OffGcd, ActionTargetType.Self)));
-        HotkeyUI.AddHotkey(new ActionHotkey(new PAction(BRDSkill.NaturesMinne, ActionType.OffGcd, ActionTargetType.Target)));
-        HotkeyUI.AddHotkey(new ActionHotkey(new PAction(3, ActionType.OffGcd, ActionTargetType.Self)));
-        HotkeyUI.AddHotkey(new ActionHotkey(new PAction(BRDSkill.RepellingShot, ActionType.OffGcd, ActionTargetType.Target)));
-        HotkeyUI.AddHotkey(new DelegateHotkey(
-            "爆发药",
-            new ExecuteLogic(EnqueuePotionHotkey),
-            iconActionId: BRDSkill.Potion));
-        HotkeyUI.AddHotkey(new DelegateHotkey(
-            "停止自动移动",
-            new ExecuteLogic(StopGreenMoveHotkey),
-            customIconPath: "Resources/stop-sign.png"));
-        HotkeyUI.AddHotkey(new DelegateHotkey(
-            "绝峰箭",
-            new ExecuteLogic(EnqueueApexArrowHotkey),
-            iconActionId: BRDSkill.ApexArrow));
-        HotkeyUI.AddHotkey(new ActionHotkey(new PAction(BRDSkill.HeadGraze, ActionType.OffGcd, ActionTargetType.Target)));
-    }
+        _panel = new HotkeyPanel(columns: 5);
 
-    private static void EnqueuePotionHotkey()
-    {
-        var potionId = Core.GameData.GetBestPotionId();
-        if (potionId == 0)
-            return;
+        _panel.AddHotkey("亲疏自行", new PAction(BRDSkill.ArmsLength, ActionType.OffGcd, ActionTargetType.Self));
+        _panel.AddHotkey("续毒",     new PAction(BRDSkill.IronJaws, ActionType.Gcd, ActionTargetType.Target));
+        _panel.AddHotkey("内丹",     new PAction(BRDSkill.SecondWind, ActionType.OffGcd, ActionTargetType.Self));
+        _panel.AddHotkey("行吟",     new PAction(BRDSkill.Troubadour, ActionType.OffGcd, ActionTargetType.Self));
+        _panel.AddHotkey("大地神",     new PAction(BRDSkill.NaturesMinne, ActionType.OffGcd, ActionTargetType.Self));
+        _panel.AddHotkey("冲刺",     new PAction(3, ActionType.OffGcd, ActionTargetType.Self));
+        _panel.AddHotkey("后跳",     new PAction(BRDSkill.RepellingShot, ActionType.OffGcd, ActionTargetType.Target));
+        _panel.AddHotkey("绝峰箭",   new ExecuteLogic(EnqueueApexArrowHotkey), iconActionId: BRDSkill.ApexArrow);
+        _panel.AddHotkey("伤头",     new PAction(BRDSkill.HeadGraze, ActionType.OffGcd, ActionTargetType.Target));
+        _panel.AddHotkey("停止移动", new ExecuteLogic(StopGreenMoveHotkey),   customIconPath: "Resources/stop-sign.png");
 
-        ActionQueueManager.Enqueue(new PAction(potionId, ActionType.Item, ActionTargetType.Self), isHighPriority: true);
+        HotkeyManager.Instance.AddHotkeyPanel(_panel);
     }
 
     private static void EnqueueApexArrowHotkey()
@@ -104,7 +89,7 @@ public class BardRotation : IRotation
         if (JobGaugeHelper.BRD.GetSoulVoice < 20)
             return;
 
-        ActionQueueManager.Enqueue(new PAction(BardHelper.Adjust(BRDSkill.ApexArrow), ActionType.Gcd, ActionTargetType.Target), isHighPriority: true);
+        HotkeyQueueManager.TryEnqueue(new PAction(BardHelper.Adjust(BRDSkill.ApexArrow), ActionType.Gcd, ActionTargetType.Target));
     }
 
     private static void StopGreenMoveHotkey()
@@ -124,6 +109,8 @@ public class BardRotation : IRotation
         { BRDQt.Sidewinder, true },
         { BRDQt.HeartBreakSave, true },
         { BRDQt.ClearHawkEyesBuffBeforeDots, true },
+        { BRDQt.NatureMinne, true },
+        { BRDQt.AutoWardensPaean, true },
         { BRDQt.AOE, false }
     };
     
@@ -133,6 +120,7 @@ public class BardRotation : IRotation
         {"90-100级 2G团辅起手", typeof(Bard2GOpener100)}
     };
 
+    public PAction? NextAlways() => null;
     public PAction? NextGcd()
     {
         // 遍历所有GCD解析器
@@ -232,30 +220,20 @@ public class BardRotation : IRotation
     {
         var settings = BardSettings.Instance;
 
-        var resetSongOrder = settings.ResetSongOrder;
-        if (ImGui.Checkbox("战斗开始重置歌序", ref resetSongOrder))
-            settings.ResetSongOrder = resetSongOrder;
-
         var firstSong = settings.FirstSong;
         if (DrawSongCombo("第一首", ref firstSong))
-        {
             settings.FirstSong = firstSong;
-            settings.SyncSongOrderOnReset();
-        }
 
         var secondSong = settings.SecondSong;
         if (DrawSongCombo("第二首", ref secondSong))
-        {
             settings.SecondSong = secondSong;
-            settings.SyncSongOrderOnReset();
-        }
 
         var thirdSong = settings.ThirdSong;
         if (DrawSongCombo("第三首", ref thirdSong))
-        {
             settings.ThirdSong = thirdSong;
-            settings.SyncSongOrderOnReset();
-        }
+        
+        if (ImGui.Button("重置默认歌序"))
+            settings.ResetSongOrderNormal();
 
         var wandererDuration = settings.WandererSongDuration;
         if (ImGui.SliderFloat("旅神歌时长", ref wandererDuration, 3f, 45f, "%.1f"))
@@ -268,13 +246,6 @@ public class BardRotation : IRotation
         var armyDuration = settings.ArmySongDuration;
         if (ImGui.SliderFloat("军神歌时长", ref armyDuration, 3f, 45f, "%.1f"))
             settings.ArmySongDuration = armyDuration;
-
-        var wandererBeforeGcdTime = settings.WandererBeforeGcdTime;
-        if (ImGui.SliderInt("旅神GCD前置毫秒", ref wandererBeforeGcdTime, 0, 1500))
-            settings.WandererBeforeGcdTime = wandererBeforeGcdTime;
-
-        if (ImGui.Button("重置默认歌序"))
-            settings.ResetSongOrderNormal();
     }
 
     private static bool DrawSongCombo(string label, ref Song song)

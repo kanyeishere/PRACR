@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net10.0-windows</TargetFramework>
@@ -9,6 +9,10 @@
         <RootNamespace>Wotou</RootNamespace>
         <DalamudReferenceRoot Condition="'$(DalamudReferenceRoot)' == ''">C:\Users\Yiwei\AppData\Roaming\XIVLauncherCN\addon\Hooks\dev</DalamudReferenceRoot>
         <PromeRotationInstalledRoot Condition="'$(PromeRotationInstalledRoot)' == ''">C:\Users\Yiwei\AppData\Roaming\XIVLauncherCN\installedPlugins\PromeRotation</PromeRotationInstalledRoot>
+        <!-- 本地编译目录：I:\repos\PromeRotation-1.0\PromeRotation\bin\x64\Debug 中的 DLL 已直接放在根目录下 -->
+        <PromeRotationLocalRoot Condition="'$(PromeRotationLocalRoot)' == ''">I:\repos\PromeRotation-1.0\PromeRotation\bin\x64\Debug</PromeRotationLocalRoot>
+        <!-- 切换开关：在命令行用 -p:PromeRotationUseLocal=true 即可立即切换到本地目录 -->
+        <PromeRotationUseLocal Condition="'$(PromeRotationUseLocal)' == ''">true</PromeRotationUseLocal>
 
         <!-- 指定输出目录 -->
         <OutputPath>C:\Users\Yiwei\AppData\Roaming\XIVLauncherCN\pluginConfigs\PromeRotation\ACR\Wotou</OutputPath>
@@ -98,13 +102,19 @@
     </UsingTask>
 
     <Target Name="ResolvePromeRotationReferenceRoot" BeforeTargets="ResolveReferences;SyncReferenceDllsToLib" Condition="'$(PromeRotationReferenceRoot)' == ''">
-        <FindLatestVersionDirectory Root="$(PromeRotationInstalledRoot)">
+        <!-- 如果启用了本地编译模式，直接使用本地目录 -->
+        <PropertyGroup Condition="'$(PromeRotationUseLocal)' == 'true'">
+            <PromeRotationReferenceRoot>$(PromeRotationLocalRoot)</PromeRotationReferenceRoot>
+        </PropertyGroup>
+
+        <!-- 否则从已安装插件目录查找最新版本 -->
+        <FindLatestVersionDirectory Root="$(PromeRotationInstalledRoot)" Condition="'$(PromeRotationReferenceRoot)' == ''">
             <Output TaskParameter="LatestDirectory" PropertyName="PromeRotationReferenceRoot" />
         </FindLatestVersionDirectory>
 
         <Error
             Condition="'$(PromeRotationReferenceRoot)' == ''"
-            Text="Unable to find a version folder under $(PromeRotationInstalledRoot). Set PromeRotationReferenceRoot manually." />
+            Text="Unable to find a version folder under $(PromeRotationInstalledRoot). Use -p:PromeRotationUseLocal=true to use the local debug build at $(PromeRotationLocalRoot), or set PromeRotationReferenceRoot manually." />
 
         <Message
             Importance="high"

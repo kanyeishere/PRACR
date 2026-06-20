@@ -14,4 +14,6 @@ public class BRDQt
     public static string HeartBreakSave = "攒碎心箭";
     public static string StrongAlignment = "强对齐";
     public static string ClearHawkEyesBuffBeforeDots = "清空鹰眼";
+    public static string NatureMinne = "大地神";
+    public static string AutoWardensPaean = "自动驱散";
 }

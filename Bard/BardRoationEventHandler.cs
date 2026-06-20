@@ -1,5 +1,6 @@
 using PromeRotation.Managers.CombatEventManager;
 using PromeRotation.Rotation;
+using Wotou.Bard.Data;
 
 namespace Wotou.Bard;
 
@@ -41,6 +42,7 @@ public class BardRoationEventHandler : IRotationEventHandler
     public void OnBattleEnded()
     {
         BardCombatEventRecorder.ResetBattleState();
+        BardSettings.Instance.ResetSongOrderNormal();
     }
 
     public void OnTerritoryChanged(ushort territoryId)
