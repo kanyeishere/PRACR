@@ -8,7 +8,7 @@
         <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
         <RootNamespace>Wotou</RootNamespace>
         <DalamudReferenceRoot Condition="'$(DalamudReferenceRoot)' == ''">C:\Users\Yiwei\AppData\Roaming\XIVLauncherCN\addon\Hooks\dev</DalamudReferenceRoot>
-        <PromeRotationReferenceRoot Condition="'$(PromeRotationReferenceRoot)' == ''">I:\repos\PromeRotation-1.0\PromeRotation\bin\x64\Debug</PromeRotationReferenceRoot>
+        <PromeRotationInstalledRoot Condition="'$(PromeRotationInstalledRoot)' == ''">C:\Users\Yiwei\AppData\Roaming\XIVLauncherCN\installedPlugins\PromeRotation</PromeRotationInstalledRoot>
 
         <!-- 指定输出目录 -->
         <OutputPath>C:\Users\Yiwei\AppData\Roaming\XIVLauncherCN\pluginConfigs\PromeRotation\ACR\Wotou</OutputPath>
@@ -61,18 +61,76 @@
         </Reference>
     </ItemGroup>
 
-    <ItemGroup>
-        <ReferenceDllsForCi Include="$(DalamudReferenceRoot)\Dalamud.dll" />
-        <ReferenceDllsForCi Include="$(DalamudReferenceRoot)\Dalamud.Bindings.ImGui.dll" />
-        <ReferenceDllsForCi Include="$(DalamudReferenceRoot)\FFXIVClientStructs.dll" />
-        <ReferenceDllsForCi Include="$(DalamudReferenceRoot)\Lumina.dll" />
-        <ReferenceDllsForCi Include="$(DalamudReferenceRoot)\Lumina.Excel.dll" />
-        <ReferenceDllsForCi Include="$(PromeRotationReferenceRoot)\ECommons.dll" />
-        <ReferenceDllsForCi Include="$(PromeRotationReferenceRoot)\PromeRotation.dll" />
-    </ItemGroup>
+    <UsingTask
+        TaskName="FindLatestVersionDirectory"
+        TaskFactory="RoslynCodeTaskFactory"
+        AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+        <ParameterGroup>
+            <Root ParameterType="System.String" Required="true" />
+            <LatestDirectory ParameterType="System.String" Output="true" />
+        </ParameterGroup>
+        <Task>
+            <Using Namespace="System" />
+            <Using Namespace="System.IO" />
+            <Code Type="Fragment" Language="cs"><![CDATA[
+                if (!Directory.Exists(Root))
+                    return true;
+
+                Version latestVersion = null;
+                string latestDirectory = null;
+
+                foreach (var directory in Directory.GetDirectories(Root))
+                {
+                    var name = Path.GetFileName(directory);
+                    if (!Version.TryParse(name, out var version))
+                        continue;
+
+                    if (latestVersion == null || version > latestVersion)
+                    {
+                        latestVersion = version;
+                        latestDirectory = directory;
+                    }
+                }
+
+                LatestDirectory = latestDirectory ?? string.Empty;
+            ]]></Code>
+        </Task>
+    </UsingTask>
+
+    <Target Name="ResolvePromeRotationReferenceRoot" BeforeTargets="ResolveReferences;SyncReferenceDllsToLib" Condition="'$(PromeRotationReferenceRoot)' == ''">
+        <FindLatestVersionDirectory Root="$(PromeRotationInstalledRoot)">
+            <Output TaskParameter="LatestDirectory" PropertyName="PromeRotationReferenceRoot" />
+        </FindLatestVersionDirectory>
+
+        <Error
+            Condition="'$(PromeRotationReferenceRoot)' == ''"
+            Text="Unable to find a version folder under $(PromeRotationInstalledRoot). Set PromeRotationReferenceRoot manually." />
+
+        <Message
+            Importance="high"
+            Text="Using PromeRotation references from $(PromeRotationReferenceRoot)" />
+
+        <ItemGroup>
+            <Reference Update="ECommons">
+                <HintPath>$(PromeRotationReferenceRoot)\ECommons.dll</HintPath>
+            </Reference>
+            <Reference Update="PromeRotation">
+                <HintPath>$(PromeRotationReferenceRoot)\PromeRotation.dll</HintPath>
+            </Reference>
+        </ItemGroup>
+    </Target>
 
     <Target Name="SyncReferenceDllsToLib" BeforeTargets="BeforeBuild" Condition="'$(GITHUB_ACTIONS)' != 'true'">
         <MakeDir Directories="$(MSBuildProjectDirectory)\lib" />
+        <ItemGroup>
+            <ReferenceDllsForCi Include="$(DalamudReferenceRoot)\Dalamud.dll" />
+            <ReferenceDllsForCi Include="$(DalamudReferenceRoot)\Dalamud.Bindings.ImGui.dll" />
+            <ReferenceDllsForCi Include="$(DalamudReferenceRoot)\FFXIVClientStructs.dll" />
+            <ReferenceDllsForCi Include="$(DalamudReferenceRoot)\Lumina.dll" />
+            <ReferenceDllsForCi Include="$(DalamudReferenceRoot)\Lumina.Excel.dll" />
+            <ReferenceDllsForCi Include="$(PromeRotationReferenceRoot)\ECommons.dll" />
+            <ReferenceDllsForCi Include="$(PromeRotationReferenceRoot)\PromeRotation.dll" />
+        </ItemGroup>
         <Copy
             SourceFiles="@(ReferenceDllsForCi)"
             DestinationFolder="$(MSBuildProjectDirectory)\lib"
