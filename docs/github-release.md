@@ -1,116 +1,118 @@
-# Wotou — 自动发布流程
+# 使用 GitHub Actions 自动构建发布 PromeRotation ACR
 
-> 本文档面向希望克隆此仓库或为自己的职业创建类似 ACR 的开发者。
-
-## 项目简介
-
-Wotou 是一个基于 PromeRotation 框架的 FFXIV 自动循环（ACR），当前实现的是 **吟游诗人（BRD）** 职业。
-整个项目通过 GitHub Actions 自动化编译、打包和发布。
+> 本文是一份通用教程，基于 Wotou（一个 BRD ACR）的实际经验总结。如果你在开发自己的 PromeRotation ACR，可以照着这个流程搭建自动发布流水线。
 
 ---
 
-## 目录
+## 整体思路
 
-- [前置条件](#前置条件)
-- [本地开发环境](#本地开发环境)
-- [本地编译](#本地编译)
-- [lib/ 引用 DLL 说明](#lib-引用-dll-说明)
-- [发布到 GitHub Actions](#发布到-github-actions)
-- [触发发布](#触发发布)
-- [更新到新版本 PromeRotation](#更新到新版本-promerotation)
-- [Fork 到其他职业](#fork-到其他职业)
+这套自动发布方案的核心是：**推送 Git tag 或手动触发 → CI 自动编译 → 打包为插件 zip → 生成 PromeRotation 远程 ACR 清单 → 发布到 GitHub Release**。
 
----
+流程中涉及的核心环节：
 
-## 前置条件
+1. 编译时引用 DLL 的处理
+2. GitHub Actions 工作流的编排
+3. 版本号同步（代码 Metadata vs. 发布清单）
+4. repo.json 清单生成
 
-- [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) 或更高版本
-- 已安装 XIVLauncher CN 和 Dalamud
-- 已安装 PromeRotation 插件
+下面逐一说明。
 
 ---
 
-## 本地开发环境
+## 一、项目结构准备
 
-### 1. 克隆仓库
+一个典型的 PromeRotation ACR 仓库结构如下：
 
-```powershell
-git clone https://github.com/<你的用户名>/Wotou.git
-cd Wotou
+```
+你的ACR仓库/
+├── .github/
+│   └── workflows/
+│       └── release.yml        # CI/CD 工作流
+├── 你的职业目录/
+│   └── YourRotation.cs        # 含 [RotationMetadata] 的主文件
+├── lib/                       # CI 编译引用 DLL
+│   ├── Dalamud.dll
+│   ├── PromeRotation.dll
+│   └── ...
+├── docs/                      # （可选）文档
+├── YourProject.csproj
+└── README.md
 ```
 
-### 2. 配置 PromeRotation 引用路径
+**关键点**：`lib/` 目录存放编译所需的引用 DLL，因为 GitHub Actions Runner 不能访问你本机上的 Dalamud 和 PromeRotation 路径。
 
-`Wotou.csproj` 中有三个 MSBuild 属性控制 PromeRotation 引用的查找路径：
+---
+
+## 二、csproj 配置
+
+在 `.csproj` 中，需要做几件事：
+
+### 1. 引用 DLL 用 HintPath 指定，不复制到输出
 
 ```xml
-<!-- PromeRotation 安装目录（已安装的版本） -->
-<PromeRotationInstalledRoot>
-  C:\Users\<用户名>\AppData\Roaming\XIVLauncherCN\installedPlugins\PromeRotation
-</PromeRotationInstalledRoot>
-
-<!-- PromeRotation 本地编译目录 -->
-<PromeRotationLocalRoot>
-  I:\repos\PromeRotation-1.0\PromeRotation\bin\x64\Debug
-</PromeRotationLocalRoot>
-
-<!-- 切换开关：true = 使用本地目录，false = 使用已安装版本 -->
-<PromeRotationUseLocal>true</PromeRotationUseLocal>
+<ItemGroup>
+    <Reference Include="Dalamud">
+        <HintPath>$(DalamudReferenceRoot)\Dalamud.dll</HintPath>
+        <Private>false</Private>
+    </Reference>
+    <Reference Include="PromeRotation">
+        <HintPath>$(PromeRotationReferenceRoot)\PromeRotation.dll</HintPath>
+        <Private>false</Private>
+    </Reference>
+    <!-- 其他 DLL 同理 -->
+</ItemGroup>
 ```
 
-**推荐**：将 `PromeRotationUseLocal` 设为 `true`，并把 `PromeRotationLocalRoot` 指向你自己本地编译的 PromeRotation 输出目录。
+`<Private>false</Private>` 确保这些 DLL 不会被打进最终的 `latest.zip`。
 
-### 3. 配置 Dalamud 引用路径
+### 2. 暴露路径变量，方便覆盖
 
 ```xml
-<DalamudReferenceRoot>
-  C:\Users\<用户名>\AppData\Roaming\XIVLauncherCN\addon\Hooks\dev
-</DalamudReferenceRoot>
+<PropertyGroup>
+    <DalamudReferenceRoot Condition="'$(DalamudReferenceRoot)' == ''">
+        C:\Users\<你的用户名>\AppData\Roaming\XIVLauncherCN\addon\Hooks\dev
+    </DalamudReferenceRoot>
+    <PromeRotationReferenceRoot Condition="'$(PromeRotationReferenceRoot)' == ''">
+        C:\Users\<你的用户名>\AppData\Roaming\XIVLauncherCN\installedPlugins\PromeRotation\1.0.0.0
+    </PromeRotationReferenceRoot>
+</PropertyGroup>
 ```
 
-如果你使用国际服或不同版本的 XIVLauncher，修改上述路径即可。
+这样本地编译和 CI 编译都可以通过 `-p:属性名=值` 来覆盖路径。CI 中会传入 `lib/` 目录的绝对路径。
+
+### 3. （可选）本地自动同步引用 DLL 到 lib/
+
+如果你希望本地 `dotnet build` 时自动将引用 DLL 复制到 `lib/` 供 CI 使用，可以加一个 MSBuild Target：
+
+```xml
+<Target Name="SyncReferenceDllsToLib" BeforeTargets="BeforeBuild"
+        Condition="'$(GITHUB_ACTIONS)' != 'true'">
+    <MakeDir Directories="$(MSBuildProjectDirectory)\lib" />
+    <ItemGroup>
+        <ReferenceDllsForCi Include="$(DalamudReferenceRoot)\Dalamud.dll" />
+        <ReferenceDllsForCi Include="$(PromeRotationReferenceRoot)\PromeRotation.dll" />
+        <!-- 其他 DLL -->
+    </ItemGroup>
+    <Copy SourceFiles="@(ReferenceDllsForCi)"
+          DestinationFolder="$(MSBuildProjectDirectory)\lib"
+          SkipUnchangedFiles="true"
+          Condition="Exists('%(ReferenceDllsForCi.Identity)')" />
+</Target>
+```
+
+注意 `Condition="'$(GITHUB_ACTIONS)' != 'true'"`：只在本地编译时执行，CI 里跳过。
 
 ---
 
-## 本地编译
+## 三、lib/ — CI 编译引用 DLL
 
-### 命令行编译
+GitHub Actions Runner 是一个干净的 Windows 环境，没有 Dalamud、没有 PromeRotation。所以你需要把编译时引用的 DLL 提交到仓库。
 
-```powershell
-dotnet build Wotou.csproj --configuration Release -p:AppendTargetFrameworkToOutputPath=false
-```
-
-### 编译结果输出
-
-默认输出到：
-
-```
-C:\Users\<用户名>\AppData\Roaming\XIVLauncherCN\pluginConfigs\PromeRotation\ACR\Wotou\
-```
-
-也可以用 `-p:OutputPath=<自定义路径>` 覆盖输出目录。
-
-### 自动同步引用 DLL
-
-项目内置了一个名为 `SyncReferenceDllsToLib` 的 MSBuild Target：
-
-- **仅在本地编译时**执行（检测到 `GITHUB_ACTIONS` 环境变量不存在时触发）
-- 自动将 Dalamud 和 PromeRotation 的引用 DLL 复制到 `lib/` 目录
-- 复制后的 DLL 可以提交到 Git，供 CI 使用
-
-> 如果本地缺少某些 DLL，编译时会先报错。先运行一次 `dotnet build` 自动补齐 `lib/`，然后再重新编译即可。
-
----
-
-## lib/ 引用 DLL 说明
-
-`lib/` 目录存放 CI 编译时需要的所有引用 DLL。因为 GitHub Actions Runner 无法访问你的本地 Dalamud 和 PromeRotation 目录，所以需要把这些 DLL 提交到仓库。
-
-### 需要的 DLL 清单
+### 需要哪些 DLL
 
 | DLL | 来源 |
 |---|---|
-| `Dalamud.dll` | XIVLauncher 开发目录 |
+| `Dalamud.dll` | XIVLauncher 开发目录（`addon/Hooks/dev/`） |
 | `Dalamud.Bindings.ImGui.dll` | XIVLauncher 开发目录 |
 | `FFXIVClientStructs.dll` | XIVLauncher 开发目录 |
 | `Lumina.dll` | XIVLauncher 开发目录 |
@@ -118,54 +120,195 @@ C:\Users\<用户名>\AppData\Roaming\XIVLauncherCN\pluginConfigs\PromeRotation\A
 | `ECommons.dll` | PromeRotation 目录 |
 | `PromeRotation.dll` | PromeRotation 目录 |
 
-### 要点
+如果你们项目依赖了其他 DLL，也需要一并放入。
 
-- 这些 DLL **仅用于编译期引用**，项目中已设置 `<Private>false</Private>`，不会被打入 `latest.zip` 发布包
-- 首次设置时，执行一次 `dotnet build`，`SyncReferenceDllsToLib` Target 会自动复制这些 DLL
-- 把复制后的结果提交到 Git：
+### 设置步骤
 
 ```powershell
+# 1. 本地先编译一次（如果有 SyncReferenceDllsToLib Target 会自动复制）
+dotnet build YourProject.csproj
+
+# 2. 提交 lib/
 git add lib/
 git commit -m "Add reference DLLs for CI build"
 git push
 ```
 
+建议在 `lib/` 下放一个 `README.md` 说明这些 DLL 的来源和用途。
+
 ---
 
-## 发布到 GitHub Actions
+## 四、GitHub Actions 工作流
 
-CI/CD 工作流文件位于：
+这是整套流程的核心。完整的 workflow 文件放在 `.github/workflows/release.yml`。
 
+### 触发方式
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example 1.5.2.2"
+        required: true
+        default: "1.0.0.0"
+  push:
+    tags:
+      - "v*"
 ```
-.github/workflows/release.yml
-```
 
-### 完整工作流程
+支持两种触发：
+- **推送 tag**（如 `git tag v1.5.2.2 && git push origin v1.5.2.2`）
+- **手动触发**：在 GitHub Actions 页面填入版本号
 
-触发发布后，CI 依次执行以下步骤：
+### 工作流总览
+
+一个完整的发布工作流包含以下步骤：
 
 | # | 步骤 | 说明 |
 |---|---|---|
-| 1 | 解析版本号 | 从 tag 或手动输入的版本字符串解析为 `System.Version` 格式 |
-| 2 | 检查引用 DLL | 确保 `lib/` 中必需的 7 个 DLL 都存在 |
-| 3 | 读取 PromeRotation 版本 | 从 `lib/PromeRotation.dll` 提取版本号，填入 `repo.json` |
-| 4 | 同步 RotationMetadata 版本 | 将 `Bard/BardRotation.cs` 中的 `RotationMetadata` 版本更新为本次发布版本 |
-| 5 | **编译** | `dotnet build --configuration Release` |
-| 6 | **打包** | 将 `Wotou.dll` 和 `Wotou.deps.json` 压缩为 `latest.zip` |
-| 7 | **生成清单** | 创建 PromeRotation 远程 ACR 格式的 `repo.json`（含 SHA256） |
-| 8 | 上传 Artifact | 保存产物到 GitHub Actions |
-| 9 | **创建 GitHub Release** | 发布 Release，附带 `latest.zip` 和 `repo.json` |
-| 10 | **更新 release 分支** | 将文件推送到 `release` 分支（提供直链下载） |
+| 1 | Checkout | 检出仓库代码 |
+| 2 | 解析版本号 | 从 tag 或手动输入解析版本，生成 `v` 前缀的 tag 名 |
+| 3 | 安装 .NET SDK | 安装项目所需的 .NET 版本 |
+| 4 | 检查引用 DLL | 确保 `lib/` 中的必需 DLL 都存在 |
+| 5 | 读取 PromeRotation 版本 | 从 `lib/PromeRotation.dll` 提取版本号 |
+| 6 | 同步 RotationMetadata 版本 | 将源文件中的版本号更新为本次发布版本 |
+| 7 | 编译 | `dotnet build --configuration Release` |
+| 8 | 打包 zip | 将 `YourAcre.dll` + `YourAcre.deps.json` 压缩为 `latest.zip` |
+| 9 | 生成 repo.json | 创建 PromeRotation 远程 ACR 清单 |
+| 10 | 上传 Artifact | 保存产物 |
+| 11 | 创建 GitHub Release | 发布 Release |
+| 12 | 更新 release 分支 | 将文件推送到 `release` 分支（可选） |
 
-### repo.json 格式说明
+### 关键步骤详解
 
-生成的 `repo.json` 是 **PromeRotation 远程 ACR 格式**，不是 Dalamud 插件仓库格式。内容示例：
+#### 解析版本号
+
+```yaml
+- name: Resolve version
+  id: version
+  shell: pwsh
+  run: |
+    $version = "${{ github.event.inputs.version }}"
+    if ([string]::IsNullOrWhiteSpace($version)) {
+      $version = "${{ github.ref_name }}"
+      if ($version.StartsWith("v")) {
+        $version = $version.Substring(1)
+      }
+    }
+    $parsedVersion = $null
+    if (-not [System.Version]::TryParse($version, [ref]$parsedVersion)) {
+      throw "Version '$version' is not a valid System.Version value."
+    }
+    "version=$version" >> $env:GITHUB_OUTPUT
+    "tag=v$version" >> $env:GITHUB_OUTPUT
+```
+
+从 tag（`v1.5.2.2` → `1.5.2.2`）或手动输入中提取版本号，并验证格式。
+
+#### 编译
+
+```yaml
+- name: Build
+  shell: pwsh
+  run: |
+    dotnet build YourProject.csproj `
+      --configuration Release `
+      -p:OutputPath="${{ runner.temp }}\publish\" `
+      -p:AppendTargetFrameworkToOutputPath=false `
+      -p:DalamudReferenceRoot="${{ github.workspace }}\lib" `
+      -p:PromeRotationReferenceRoot="${{ github.workspace }}\lib"
+```
+
+关键点：通过 `-p` 将引用路径指向仓库中的 `lib/` 目录。
+
+#### 打包
+
+```yaml
+- name: Package zip
+  shell: pwsh
+  run: |
+    Compress-Archive `
+      -Path "${{ runner.temp }}\publish\YourAcre.dll", "${{ runner.temp }}\publish\YourAcre.deps.json" `
+      -DestinationPath "${{ runner.temp }}\dist\latest.zip" `
+      -Force
+```
+
+只打包 `dll` 和 `deps.json`，引用 DLL 不在其中。
+
+#### 生成 repo.json
+
+```yaml
+- name: Generate repo json
+  shell: pwsh
+  run: |
+    $sha256 = (Get-FileHash -Algorithm SHA256 -Path "${{ runner.temp }}\dist\latest.zip").Hash.ToLowerInvariant()
+
+    $manifest = [ordered]@{
+      author = "你的名字"
+      version = "${{ steps.version.outputs.version }}"
+      description = "你的 ACR 描述"
+      supportedJobs = @(
+        [ordered]@{
+          job = "BRD"           # 改成你的职业缩写
+          contentScope = "Unspecified"
+        }
+      )
+      apiVersion = [int]"15"                     # PromeRotation API 版本
+      referencePromeVersion = "上一步读取的版本"
+      downloadUrl = "https://raw.githubusercontent.com/${{ github.repository }}/release/latest.zip"
+      sha256 = $sha256
+    }
+
+    $json = $manifest | ConvertTo-Json -Depth 8
+    Set-Content -Path "${{ runner.temp }}\dist\repo.json" -Value $json -Encoding UTF8
+```
+
+这是** PromeRotation 远程 ACR 的专属清单格式**，不是 Dalamud 插件仓库格式。PromeRotation 通过这个 `repo.json` 来发现和下载远程 ACR。
+
+### 完整的 workflow 模板
+
+完整的模板见本教程末尾的附录 A：release.yml 完整模板。
+
+---
+
+## 五、版本号同步
+
+你的 Rotation 类上有一个 `[RotationMetadata]` 属性，里面也包含版本号。发布时需要把它和发布版本保持一致。
+
+工作流中用一个正则替换步骤来完成：
+
+```yaml
+- name: Sync RotationMetadata version
+  shell: pwsh
+  run: |
+    $path = "YourJobDir/YourRotation.cs"   # 改成你的源文件路径
+    $version = "${{ steps.version.outputs.version }}"
+    $text = Get-Content -Path $path -Raw
+    $pattern = '(\[RotationMetadata\(\(uint\)Job\.你的职业,\s*"[^"]+",\s*"[^"]+",\s*")[^"]+("\)\])'
+    $regex = [regex]::new($pattern)
+    $updated = $regex.Replace($text, '$1' + $version + '$2', 1)
+
+    if ($updated -eq $text) {
+      throw "Could not find RotationMetadata version in $path."
+    }
+
+    Set-Content -Path $path -Value $updated -Encoding UTF8
+```
+
+如果你觉得正则难以维护，也可以在发布前手动改好版本号再打 tag 推送，跳过这个步骤。
+
+---
+
+## 六、repo.json 清单格式
+
+`repo.json` 是 PromeRotation 识别远程 ACR 的入口，格式如下：
 
 ```json
 {
-  "author": "Wotou",
+  "author": "你的名字",
   "version": "1.5.2.2",
-  "description": "一个简单的ACR",
+  "description": "你的 ACR 描述",
   "supportedJobs": [
     {
       "job": "BRD",
@@ -174,23 +317,29 @@ CI/CD 工作流文件位于：
   ],
   "apiVersion": 15,
   "referencePromeVersion": "1.0.0.0",
-  "downloadUrl": "https://raw.githubusercontent.com/<owner>/<repo>/release/latest.zip",
+  "downloadUrl": "https://raw.githubusercontent.com/你的用户名/你的仓库/release/latest.zip",
   "sha256": "abcdef..."
 }
 ```
 
-### 下载链接
+字段说明：
 
-每次成功发布后，可从以下链接获取文件：
-
-| 文件 | 链接 |
+| 字段 | 说明 |
 |---|---|
-| `latest.zip` | `https://github.com/<owner>/<repo>/releases/latest/download/latest.zip` |
-| `repo.json` | `https://github.com/<owner>/<repo>/releases/latest/download/repo.json` |
+| `author` | 作者名 |
+| `version` | 当前 ACR 版本号 |
+| `description` | 简短描述 |
+| `supportedJobs` | 支持哪些职业（可多职业） |
+| `job` | 职业缩写（BRD / MCH / DNC 等） |
+| `contentScope` | 内容范围，通常为 `Unspecified` |
+| `apiVersion` | PromeRotation API 版本 |
+| `referencePromeVersion` | 此 ACR 所基于的 PromeRotation 版本 |
+| `downloadUrl` | `latest.zip` 的下载地址 |
+| `sha256` | `latest.zip` 的文件哈希 |
 
 ---
 
-## 触发发布
+## 七、触发发布
 
 ### 方式一：推送 Git Tag（推荐）
 
@@ -199,81 +348,241 @@ git tag v1.5.2.2
 git push origin v1.5.2.2
 ```
 
-- Tag 名称必须为 `v` 开头 + 有效的四段版本号（例如 `v1.5.2.2`）
-- 工作流会自动去掉 `v` 前缀，将版本号传入编译和 `repo.json`
+tag 名必须为 `v` + 有效的四段版本号（如 `v1.5.2.2`）。
 
+### 方式二：手动触发
 
-### 版本号格式
+1. 打开仓库的 Actions 页面
+2. 选择 **Build and Release** 工作流
+3. 点击 **Run workflow**
+4. 输入版本号（如 `1.5.2.2`，不需要 `v` 前缀）
 
-版本号必须是符合 .NET `System.Version` 的四段数字格式：
+### 发布后的下载链接
 
-```
-<主版本>.<次版本>.<构建号>.<修订号>
-```
+每次成功发布后，可从以下链接获取文件：
 
-例如：`1.0.0.0`、`2.3.1.5`、`10.0.0.1`。
+- `latest.zip`：`https://github.com/<你的用户名>/<你的仓库>/releases/latest/download/latest.zip`
+- `repo.json`：`https://github.com/<你的用户名>/<你的仓库>/releases/latest/download/repo.json`
+
+将 `repo.json` 的链接填入 PromeRotation 的远程 ACR 配置界面即可自动加载。
 
 ---
 
-## 更新到新版本 PromeRotation
+## 八、更新 PromeRotation 依赖
 
-当你本地更新了 PromeRotation 插件后，需要同步更新 `lib/` 中的引用 DLL：
+当你本地更新了 PromeRotation 后，需要同步更新 `lib/` 中的引用 DLL：
 
 ```powershell
 # 1. 确保 PromeRotation 已更新到最新版本
-# 2. 本地编译（会自动把新版 DLL 复制到 lib/）
-dotnet build Wotou.csproj
+# 2. 本地编译（自动把新版 DLL 复制到 lib/）
+dotnet build YourProject.csproj
 
-# 3. 查看更新的文件
-git diff --stat lib/
-
-# 4. 提交变更
+# 3. 提交变更
 git add lib/
 git commit -m "Update PromeRotation reference to x.x.x.x"
 git push
 ```
 
-CI 会自动从 `lib/PromeRotation.dll` 提取版本号填入 `repo.json` 的 `referencePromeVersion` 字段。
+CI 会自动从 `lib/PromeRotation.dll` 提取版本号，填入 `repo.json` 的 `referencePromeVersion` 字段。
 
 ---
 
-## Fork 到其他职业
+## 九、常见问题
 
-如果你想为其他职业创建类似的 ACR，需要修改以下内容：
+### Q: 本地编译报错找不到引用 DLL
 
-### 1. 创建职业目录
+检查 csproj 中的 `DalamudReferenceRoot`、`PromeRotationReferenceRoot` 是否指向正确的本地路径。
 
-将 `Bard/` 目录复制重命名为目标职业的目录名，例如 `Mch/`、`Dnc/`、`Wm/`。
+### Q: 不想把 DLL 提交到 Git
 
-### 2. 修改核心类
+可以考虑：
+- 在 CI 中用 `actions/cache` 缓存 DLL
+- 用 Git LFS 管理大文件
+- 自行搭建一个内网存储来下载 DLL
 
-| 需要修改的内容 | 位置 | 说明 |
-|---|---|---|
-| 命名空间 | Rotation 类文件 | 将 `Wotou.Bard` 改为目标职业命名空间 |
-| 职业 ID | `RotationMetadata` 属性 | 将 `(uint)Job.BRD` 改为目标职业，例如 `(uint)Job.MCH` |
-| 职业技能 | `BRDData/BRDSkill.cs` | 替换为目标职业的技能 ID |
-| 职业 Buff | `BRDData/BRDBuff.cs` | 替换为目标职业的 Buff ID |
-| 全局引用 | `GlobalUsings.cs` | 添加新命名空间的引用 |
+不过最省事的办法就是直接提交到仓库（DLL 合计约几十 MB），对于大多数项目来说可以接受。
 
-### 3. 修改 CI 配置
+### Q: 不想用 release 分支分发
 
-在 `.github/workflows/release.yml` 中：
+删除 workflow 中 `peaceiris/actions-gh-pages` 那一步即可。GitHub Release 本身已提供下载源。
 
-| 环境变量或配置 | 说明 |
-|---|---|
-| `ACR_JOB` | 改为对应职业缩写，例如 `MCH` |
-| `ACR_DESCRIPTION` | 改为你的 ACR 描述 |
-| `ACR_AUTHOR` | 改为你的名字 |
-| `Sync RotationMetadata version` 步骤 | 将正则匹配的文件路径从 `Bard/BardRotation.cs` 改为新路径 |
+### Q: 想用国内云存储来加速下载
 
-### 4. 修改 RotationMetadata
+修改 workflow 中 `Generate repo json` 步骤的 `downloadUrl` 指向你的 CDN 地址，并添加一个上传到 CDN 的步骤。
 
-```csharp
-// 将：
-[RotationMetadata((uint)Job.BRD, "诗人", "Wotou", "1.0.0.0")]
+### Q: 我的 ACR 支持多个职业
 
-// 改为：
-[RotationMetadata((uint)Job.MCH, "机工士", "Wotou", "1.0.0.0")]
+在 `repo.json` 的 `supportedJobs` 数组中添加多个职业对象即可：
+
+```json
+"supportedJobs": [
+  { "job": "BRD", "contentScope": "Unspecified" },
+  { "job": "MCH", "contentScope": "Unspecified" }
+]
 ```
 
 ---
+
+## 附录 A：release.yml 完整模板
+
+```yaml
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example 1.5.2.2"
+        required: true
+        default: "1.0.0.0"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  ACR_AUTHOR: 你的名字
+  ACR_DESCRIPTION: 你的 ACR 描述
+  ACR_JOB: BRD              # 改成你的职业缩写
+  ACR_CONTENT_SCOPE: Unspecified
+  ACR_API_VERSION: "15"
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $version = "${{ github.event.inputs.version }}"
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            $version = "${{ github.ref_name }}"
+            if ($version.StartsWith("v")) {
+              $version = $version.Substring(1)
+            }
+          }
+          $parsedVersion = $null
+          if (-not [System.Version]::TryParse($version, [ref]$parsedVersion)) {
+            throw "Version '$version' is not a valid System.Version value."
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"    # 改成你的 .NET 版本
+
+      - name: Check reference DLLs
+        id: references
+        shell: pwsh
+        run: |
+          $required = @(
+            "Dalamud.dll",
+            "Dalamud.Bindings.ImGui.dll",
+            "FFXIVClientStructs.dll",
+            "Lumina.dll",
+            "Lumina.Excel.dll",
+            "ECommons.dll",
+            "PromeRotation.dll"
+          )
+          $missing = $required | Where-Object { -not (Test-Path "lib/$_") }
+          if ($missing.Count -gt 0) {
+            throw "Missing reference DLLs in lib/: $($missing -join ', ')"
+          }
+          $promeDll = Resolve-Path "lib/PromeRotation.dll"
+          $promeVersion = [System.Reflection.AssemblyName]::GetAssemblyName($promeDll).Version.ToString()
+          "prome_version=$promeVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Sync RotationMetadata version
+        shell: pwsh
+        run: |
+          $path = "你的职业目录/YourRotation.cs"    # 改成你的源文件路径
+          $version = "${{ steps.version.outputs.version }}"
+          $text = Get-Content -Path $path -Raw
+          $pattern = '(\[RotationMetadata\(\(uint\)Job\.BRD,\s*"[^"]+",\s*"[^"]+",\s*")[^"]+("\)\])'
+          $regex = [regex]::new($pattern)
+          $updated = $regex.Replace($text, '$1' + $version + '$2', 1)
+          if ($updated -eq $text) {
+            throw "Could not find RotationMetadata version in $path."
+          }
+          Set-Content -Path $path -Value $updated -Encoding UTF8
+
+      - name: Build
+        shell: pwsh
+        run: |
+          dotnet build YourProject.csproj `
+            --configuration Release `
+            -p:OutputPath="${{ runner.temp }}\publish\" `
+            -p:AppendTargetFrameworkToOutputPath=false `
+            -p:DalamudReferenceRoot="${{ github.workspace }}\lib" `
+            -p:PromeRotationReferenceRoot="${{ github.workspace }}\lib"
+
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $dist = "${{ runner.temp }}\dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Compress-Archive `
+            -Path "${{ runner.temp }}\publish\YourAcre.dll", "${{ runner.temp }}\publish\YourAcre.deps.json" `
+            -DestinationPath "$dist\latest.zip" `
+            -Force
+
+      - name: Generate repo json
+        shell: pwsh
+        run: |
+          $dist = "${{ runner.temp }}\dist"
+          $sha256 = (Get-FileHash -Algorithm SHA256 -Path "$dist\latest.zip").Hash.ToLowerInvariant()
+          $manifest = [ordered]@{
+            author = "${{ env.ACR_AUTHOR }}"
+            version = "${{ steps.version.outputs.version }}"
+            description = "${{ env.ACR_DESCRIPTION }}"
+            supportedJobs = @(
+              [ordered]@{
+                job = "${{ env.ACR_JOB }}"
+                contentScope = "${{ env.ACR_CONTENT_SCOPE }}"
+              }
+            )
+            apiVersion = [int]"${{ env.ACR_API_VERSION }}"
+            referencePromeVersion = "${{ steps.references.outputs.prome_version }}"
+            downloadUrl = "https://raw.githubusercontent.com/${{ github.repository }}/release/latest.zip"
+            sha256 = $sha256
+          }
+          $json = $manifest | ConvertTo-Json -Depth 8
+          Set-Content -Path "$dist\repo.json" -Value $json -Encoding UTF8
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: |
+            ${{ runner.temp }}\dist\latest.zip
+            ${{ runner.temp }}\dist\repo.json
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        continue-on-error: true
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.version.outputs.tag }}
+          make_latest: true
+          files: |
+            ${{ runner.temp }}\dist\latest.zip
+            ${{ runner.temp }}\dist\repo.json
+
+      - name: Publish stable download branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ github.token }}
+          publish_branch: release
+          publish_dir: ${{ runner.temp }}\dist
+          force_orphan: true
+```
