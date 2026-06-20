@@ -2,16 +2,16 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.JobGauge.Enums;
 using ECommons.ExcelServices;
 using PromeRotation;
-using PromeRotation.Core;
 using PromeRotation.Data;
 using PromeRotation.Helpers;
 using PromeRotation.Managers;
 using PromeRotation.Resolvers;
 using PromeRotation.Rotation;
+using PromeRotation.Timeline.Core;
 using Wotou.Bard.Action;
 using Wotou.Bard.Data;
 using Wotou.Bard.Opener;
-using PromeRotation.UI.HotKey;
+using Wotou.Bard.UI;
 
 namespace Wotou.Bard;
 
@@ -20,12 +20,9 @@ public class BardRotation : IRotation
 {
     public string RotationName => "诗人";
     public uint JobId => (uint)Job.BRD;
-
-    //private readonly IRotationEventHandler _eventHandler = new DancerRotationRotationEventHandler();
-   // public IRotationEventHandler GetEventHandler() => _eventHandler;
+    public static IJobNodeProvider? NodeProvider { get; } = new BardJobNodeProvider();
 
     private readonly List<IDecisionResolver> _gcdResolvers = new();
-    private static HotkeyPanel _panel = null!;
     private readonly List<IDecisionResolver> _offGcdResolvers = new();
 
     public BardRotation()
@@ -63,38 +60,7 @@ public class BardRotation : IRotation
         foreach (var (name, def) in QtList)
             PromeSettings.Instance.AddQt(name, def);
 
-        SetupHotkeyPanel();
-    }
-
-    private static void SetupHotkeyPanel()
-    {
-        _panel = new HotkeyPanel(columns: 5);
-
-        _panel.AddHotkey("亲疏自行", new PAction(BRDSkill.ArmsLength, ActionType.OffGcd, ActionTargetType.Self));
-        _panel.AddHotkey("续毒",     new PAction(BRDSkill.IronJaws, ActionType.Gcd, ActionTargetType.Target));
-        _panel.AddHotkey("内丹",     new PAction(BRDSkill.SecondWind, ActionType.OffGcd, ActionTargetType.Self));
-        _panel.AddHotkey("行吟",     new PAction(BRDSkill.Troubadour, ActionType.OffGcd, ActionTargetType.Self));
-        _panel.AddHotkey("大地神",     new PAction(BRDSkill.NaturesMinne, ActionType.OffGcd, ActionTargetType.Self));
-        _panel.AddHotkey("冲刺",     new PAction(3, ActionType.OffGcd, ActionTargetType.Self));
-        _panel.AddHotkey("后跳",     new PAction(BRDSkill.RepellingShot, ActionType.OffGcd, ActionTargetType.Target));
-        _panel.AddHotkey("绝峰箭",   new ExecuteLogic(EnqueueApexArrowHotkey), iconActionId: BRDSkill.ApexArrow);
-        _panel.AddHotkey("伤头",     new PAction(BRDSkill.HeadGraze, ActionType.OffGcd, ActionTargetType.Target));
-        _panel.AddHotkey("停止移动", new ExecuteLogic(StopGreenMoveHotkey),   customIconPath: "Resources/stop-sign.png");
-
-        HotkeyManager.Instance.AddHotkeyPanel(_panel);
-    }
-
-    private static void EnqueueApexArrowHotkey()
-    {
-        if (JobGaugeHelper.BRD.GetSoulVoice < 20)
-            return;
-
-        HotkeyQueueManager.TryEnqueue(new PAction(BardHelper.Adjust(BRDSkill.ApexArrow), ActionType.Gcd, ActionTargetType.Target));
-    }
-
-    private static void StopGreenMoveHotkey()
-    {
-        Plugin.Instance.GreenMoveSystem.Stop();
+        BardHotkeyUI.SetupHotkeyPanel();
     }
 
     public static IReadOnlyDictionary<string, bool> QtList { get; } = new Dictionary<string, bool>
@@ -113,38 +79,35 @@ public class BardRotation : IRotation
         { BRDQt.AutoWardensPaean, true },
         { BRDQt.AOE, false }
     };
-    
+
     public static IReadOnlyDictionary<string, Type> Openers { get; } = new Dictionary<string, Type>
     {
         {"90-100级 3G团辅起手", typeof(Bard3GOpener100)},
-        {"90-100级 2G团辅起手", typeof(Bard2GOpener100)}
+        {"90-100级 2G团辅起手", typeof(Bard2GOpener100)},
+        {"100级 1G团辅起手", typeof(Bard1GOpener100)},
+        {"70-80级 3G团辅起手", typeof(Bard3GOpener7080)},
+        {"70级 5G团辅起手", typeof(Bard5GOpener70)},
+        {"100级 FR起手", typeof(BardFROpener100)}
     };
 
     public PAction? NextAlways() => null;
+
     public PAction? NextGcd()
     {
-        // 遍历所有GCD解析器
         foreach (var resolver in _gcdResolvers)
         {
             if (resolver.Check().Success)
-            {
-                // 找到第一个满足条件的，返回它的决策结果
                 return resolver.GetAction();
-            }
         }
-        // 如果所有求解器都不满足条件，返回null
         return null;
     }
 
     public PAction? NextOffGcd()
     {
-        // 遍历所有oGCD解析器 同上
         foreach (var resolver in _offGcdResolvers)
         {
             if (resolver.Check().Success)
-            {
                 return resolver.GetAction();
-            }
         }
         return null;
     }
@@ -183,7 +146,12 @@ public class BardRotation : IRotation
     {
         return BardSettings.Instance.Opener switch
         {
+            0 => new Bard3GOpener100(),
             1 => new Bard2GOpener100(),
+            2 => new Bard1GOpener100(),
+            3 => new Bard3GOpener7080(),
+            4 => new Bard5GOpener70(),
+            6 => new BardFROpener100(),
             _ => new Bard3GOpener100()
         };
     }
@@ -199,13 +167,13 @@ public class BardRotation : IRotation
 
         if (ImGui.BeginTabItem("歌轴"))
         {
-            DrawSongSettings();
+            BardSongUI.DrawSongSettings();
             ImGui.EndTabItem();
         }
 
         if (ImGui.BeginTabItem("起手"))
         {
-            DrawOpenerSettings();
+            BardOpenerUI.DrawOpenerSettings();
             ImGui.EndTabItem();
         }
 
@@ -214,99 +182,5 @@ public class BardRotation : IRotation
 
     public void DrawQTs()
     {
-    }
-
-    private static void DrawSongSettings()
-    {
-        var settings = BardSettings.Instance;
-
-        var firstSong = settings.FirstSong;
-        if (DrawSongCombo("第一首", ref firstSong))
-            settings.FirstSong = firstSong;
-
-        var secondSong = settings.SecondSong;
-        if (DrawSongCombo("第二首", ref secondSong))
-            settings.SecondSong = secondSong;
-
-        var thirdSong = settings.ThirdSong;
-        if (DrawSongCombo("第三首", ref thirdSong))
-            settings.ThirdSong = thirdSong;
-        
-        if (ImGui.Button("重置默认歌序"))
-            settings.ResetSongOrderNormal();
-
-        var wandererDuration = settings.WandererSongDuration;
-        if (ImGui.SliderFloat("旅神歌时长", ref wandererDuration, 3f, 45f, "%.1f"))
-            settings.WandererSongDuration = wandererDuration;
-
-        var mageDuration = settings.MageSongDuration;
-        if (ImGui.SliderFloat("贤者歌时长", ref mageDuration, 3f, 45f, "%.1f"))
-            settings.MageSongDuration = mageDuration;
-
-        var armyDuration = settings.ArmySongDuration;
-        if (ImGui.SliderFloat("军神歌时长", ref armyDuration, 3f, 45f, "%.1f"))
-            settings.ArmySongDuration = armyDuration;
-    }
-
-    private static bool DrawSongCombo(string label, ref Song song)
-    {
-        var changed = false;
-        if (!ImGui.BeginCombo(label, SongDisplayName(song))) return false;
-
-        foreach (var candidate in new[] { Song.WanderersMinuet, Song.MagesBallad, Song.ArmysPaeon })
-        {
-            var selected = song == candidate;
-            if (ImGui.Selectable(SongDisplayName(candidate), selected))
-            {
-                song = candidate;
-                changed = true;
-            }
-
-            if (selected)
-                ImGui.SetItemDefaultFocus();
-        }
-
-        ImGui.EndCombo();
-        return changed;
-    }
-
-    private static void DrawOpenerSettings()
-    {
-        var settings = BardSettings.Instance;
-
-        var usePotionInOpener = settings.UsePotionInOpener;
-        if (ImGui.Checkbox("起手吃爆发药", ref usePotionInOpener))
-            settings.UsePotionInOpener = usePotionInOpener;
-
-        var opener = settings.Opener;
-        if (ImGui.BeginCombo("起手选择", OpenerDisplayName(opener)))
-        {
-            if (ImGui.Selectable("90-100级 3G团辅起手", opener == 0))
-                settings.Opener = 0;
-            if (ImGui.Selectable("90-100级 2G团辅起手", opener == 1))
-                settings.Opener = 1;
-
-            ImGui.EndCombo();
-        }
-    }
-
-    private static string OpenerDisplayName(int opener)
-    {
-        return opener switch
-        {
-            1 => "90-100级 2G团辅起手",
-            _ => "90-100级 3G团辅起手"
-        };
-    }
-
-    private static string SongDisplayName(Song song)
-    {
-        return song switch
-        {
-            Song.WanderersMinuet => "旅神",
-            Song.MagesBallad => "贤者",
-            Song.ArmysPaeon => "军神",
-            _ => "无"
-        };
     }
 }

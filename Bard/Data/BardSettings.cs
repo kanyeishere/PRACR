@@ -5,7 +5,6 @@ namespace Wotou.Bard.Data;
 public class BardSettings
 {
     public static BardSettings Instance { get; } = new();
-
     public float WandererSongDuration { get; set; } = 42.6f;
     public float MageSongDuration { get; set; } = 39.2f;
     public float ArmySongDuration { get; set; } = 39f;
@@ -29,7 +28,6 @@ public class BardSettings
     public bool UsePotionInOpener { get; set; } = false;
 
     public int Opener { get; set; } = 0;
-
     public bool IsDailyMode { get; set; } = false;
 
     public bool ApplyDotOnTrashMobs { get; set; } = false;

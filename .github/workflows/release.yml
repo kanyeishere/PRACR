@@ -16,7 +16,7 @@ permissions:
 
 env:
   ACR_AUTHOR: Wotou
-  ACR_DESCRIPTION: 一个简单的ACR
+  ACR_DESCRIPTION: 一个简单的只支持高难的ACR
   ACR_JOB: BRD
   ACR_CONTENT_SCOPE: Unspecified
   ACR_API_VERSION: "15"
