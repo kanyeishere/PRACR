@@ -6,7 +6,7 @@
 
 ## 整体思路
 
-这套自动发布方案的核心是：**推送 Git tag 或手动触发 → CI 自动编译 → 打包为插件 zip → 生成 PromeRotation 远程 ACR 清单 → 发布到 GitHub Release**。
+这套自动发布方案的核心是：**推送 Git tag → CI 自动编译 → 打包为插件 zip → 生成 PromeRotation 远程 ACR 清单 → 发布到 GitHub Release**。
 
 流程中涉及的核心环节：
 
@@ -63,7 +63,7 @@
 </ItemGroup>
 ```
 
-`<Private>false</Private>` 确保这些 DLL 不会被打进最终的 `latest.zip`。
+`<Private>false</Private>` 确保这些 DLL 不会被打包进最终的 `latest.zip`。
 
 ### 2. 暴露路径变量，方便覆盖
 
@@ -80,9 +80,9 @@
 
 这样本地编译和 CI 编译都可以通过 `-p:属性名=值` 来覆盖路径。CI 中会传入 `lib/` 目录的绝对路径。
 
-### 3. （可选）本地自动同步引用 DLL 到 lib/
+### 3. 本地自动同步引用 DLL 到 lib/
 
-如果你希望本地 `dotnet build` 时自动将引用 DLL 复制到 `lib/` 供 CI 使用，可以加一个 MSBuild Target：
+如果你希望本地 `dotnet build` 时自动将引用 DLL 复制到 `lib/` 供 CI 使用，可以加一个 MSBuild Target，这对于后边实现自动发布很关键：
 
 ```xml
 <Target Name="SyncReferenceDllsToLib" BeforeTargets="BeforeBuild"
@@ -141,6 +141,7 @@ git push
 ## 四、GitHub Actions 工作流
 
 这是整套流程的核心。完整的 workflow 文件放在 `.github/workflows/release.yml`。
+你可以直接复制使用
 
 ### 触发方式
 
@@ -157,9 +158,8 @@ on:
       - "v*"
 ```
 
-支持两种触发：
+触发命令：
 - **推送 tag**（如 `git tag v1.5.2.2 && git push origin v1.5.2.2`）
-- **手动触发**：在 GitHub Actions 页面填入版本号
 
 ### 工作流总览
 
@@ -168,7 +168,7 @@ on:
 | # | 步骤 | 说明 |
 |---|---|---|
 | 1 | Checkout | 检出仓库代码 |
-| 2 | 解析版本号 | 从 tag 或手动输入解析版本，生成 `v` 前缀的 tag 名 |
+| 2 | 解析版本号 | 从 tag（`v1.5.2.2`）中提取版本号，生成 `v` 前缀的 tag 名 |
 | 3 | 安装 .NET SDK | 安装项目所需的 .NET 版本 |
 | 4 | 检查引用 DLL | 确保 `lib/` 中的必需 DLL 都存在 |
 | 5 | 读取 PromeRotation 版本 | 从 `lib/PromeRotation.dll` 提取版本号 |
@@ -272,9 +272,11 @@ on:
 
 ---
 
-## 五、版本号同步
+## 五、支持版本号同步
 
 你的 Rotation 类上有一个 `[RotationMetadata]` 属性，里面也包含版本号。发布时需要把它和发布版本保持一致。
+
+也就是说 **你无须每次手动更新代码里的版本号， 本工作流会自动根据推送 tag（如 `git tag v1.5.2.2 && git push origin v1.5.2.2`）中的版本号，为你做修改**
 
 工作流中用一个正则替换步骤来完成：
 
@@ -296,11 +298,9 @@ on:
     Set-Content -Path $path -Value $updated -Encoding UTF8
 ```
 
-如果你觉得正则难以维护，也可以在发布前手动改好版本号再打 tag 推送，跳过这个步骤。
-
 ---
 
-## 六、repo.json 清单格式
+## 六、自动生成的 repo.json 格式
 
 `repo.json` 是 PromeRotation 识别远程 ACR 的入口，格式如下：
 
@@ -341,7 +341,7 @@ on:
 
 ## 七、触发发布
 
-### 方式一：推送 Git Tag（推荐）
+### 推送 Git Tag
 
 ```powershell
 git tag v1.5.2.2
@@ -350,12 +350,6 @@ git push origin v1.5.2.2
 
 tag 名必须为 `v` + 有效的四段版本号（如 `v1.5.2.2`）。
 
-### 方式二：手动触发
-
-1. 打开仓库的 Actions 页面
-2. 选择 **Build and Release** 工作流
-3. 点击 **Run workflow**
-4. 输入版本号（如 `1.5.2.2`，不需要 `v` 前缀）
 
 ### 发布后的下载链接
 
@@ -383,47 +377,15 @@ git commit -m "Update PromeRotation reference to x.x.x.x"
 git push
 ```
 
-CI 会自动从 `lib/PromeRotation.dll` 提取版本号，填入 `repo.json` 的 `referencePromeVersion` 字段。
+CI 会自动从 `lib/PromeRotation.dll` 提取版本号，填入 `repo.json` 的 `referencePromeVersion` 字段。 也无需手动维护。
 
 ---
 
-## 九、常见问题
-
-### Q: 本地编译报错找不到引用 DLL
-
-检查 csproj 中的 `DalamudReferenceRoot`、`PromeRotationReferenceRoot` 是否指向正确的本地路径。
-
-### Q: 不想把 DLL 提交到 Git
-
-可以考虑：
-- 在 CI 中用 `actions/cache` 缓存 DLL
-- 用 Git LFS 管理大文件
-- 自行搭建一个内网存储来下载 DLL
-
-不过最省事的办法就是直接提交到仓库（DLL 合计约几十 MB），对于大多数项目来说可以接受。
-
-### Q: 不想用 release 分支分发
-
-删除 workflow 中 `peaceiris/actions-gh-pages` 那一步即可。GitHub Release 本身已提供下载源。
-
-### Q: 想用国内云存储来加速下载
-
-修改 workflow 中 `Generate repo json` 步骤的 `downloadUrl` 指向你的 CDN 地址，并添加一个上传到 CDN 的步骤。
-
-### Q: 我的 ACR 支持多个职业
-
-在 `repo.json` 的 `supportedJobs` 数组中添加多个职业对象即可：
-
-```json
-"supportedJobs": [
-  { "job": "BRD", "contentScope": "Unspecified" },
-  { "job": "MCH", "contentScope": "Unspecified" }
-]
-```
 
 ---
 
 ## 附录 A：release.yml 完整模板
+你可以直接复制使用 
 
 ```yaml
 name: Build and Release
@@ -461,12 +423,9 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          $version = "${{ github.event.inputs.version }}"
-          if ([string]::IsNullOrWhiteSpace($version)) {
-            $version = "${{ github.ref_name }}"
-            if ($version.StartsWith("v")) {
-              $version = $version.Substring(1)
-            }
+          $version = "${{ github.ref_name }}"
+          if ($version.StartsWith("v")) {
+            $version = $version.Substring(1)
           }
           $parsedVersion = $null
           if (-not [System.Version]::TryParse($version, [ref]$parsedVersion)) {
@@ -586,3 +545,5 @@ jobs:
           publish_dir: ${{ runner.temp }}\dist
           force_orphan: true
 ```
+
+
