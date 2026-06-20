@@ -86,7 +86,14 @@ jobs:
           $version = "${{ steps.version.outputs.version }}"
           $text = Get-Content -Path $path -Raw
           $pattern = '(\[RotationMetadata\(\(uint\)Job\.BRD,\s*"[^"]+",\s*"[^"]+",\s*")[^"]+("\)\])'
-          $updated = [regex]::Replace($text, $pattern, "`$1$version`$2", 1)
+          $regex = [regex]::new($pattern)
+          $updated = $regex.Replace(
+            $text,
+            [System.Text.RegularExpressions.MatchEvaluator]{
+              param($match)
+              $match.Groups[1].Value + $version + $match.Groups[2].Value
+            },
+            1)
 
           if ($updated -eq $text) {
             throw "Could not find RotationMetadata version in $path."
