@@ -128,7 +128,7 @@ jobs:
         shell: pwsh
         run: |
           $dist = "${{ runner.temp }}\dist"
-          $zipUrl = "https://github.com/${{ github.repository }}/releases/latest/download/latest.zip"
+          $zipUrl = "https://raw.githubusercontent.com/${{ github.repository }}/release/latest.zip"
           $zipPath = "$dist\latest.zip"
           $sha256 = (Get-FileHash -Algorithm SHA256 -Path $zipPath).Hash.ToLowerInvariant()
 
@@ -163,8 +163,9 @@ jobs:
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
+        continue-on-error: true
         with:
-          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
           tag_name: ${{ steps.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: ${{ steps.version.outputs.tag }}
@@ -176,7 +177,7 @@ jobs:
       - name: Publish stable download branch
         uses: peaceiris/actions-gh-pages@v4
         with:
-          github_token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.RELEASE_TOKEN || github.token }}
           publish_branch: release
           publish_dir: ${{ runner.temp }}\dist
           force_orphan: true
