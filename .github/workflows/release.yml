@@ -15,14 +15,11 @@ permissions:
   contents: write
 
 env:
-  AUTHOR: Miruku
-  NAME: PromeRotation
-  PUNCHLINE: 雨露霜雪
-  DESCRIPTION: An advanced combat rotation platform for FFXIV high-end content.
-  INTERNAL_NAME: PromeRotation
-  DALAMUD_API_LEVEL: "15"
-  ICON_URL: https://vip.123pan.cn/1830059912/PromeRotation/prome.png
-  TAGS: '["combat","rotation","prome"]'
+  ACR_AUTHOR: Wotou
+  ACR_DESCRIPTION: 一个简单的ACR
+  ACR_JOB: BRD
+  ACR_CONTENT_SCOPE: Unspecified
+  ACR_API_VERSION: "15"
 
 jobs:
   release:
@@ -58,6 +55,7 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Check reference DLLs
+        id: references
         shell: pwsh
         run: |
           $required = @(
@@ -74,6 +72,10 @@ jobs:
           if ($missing.Count -gt 0) {
             throw "Missing reference DLLs in lib/: $($missing -join ', ')"
           }
+
+          $promeDll = Resolve-Path "lib/PromeRotation.dll"
+          $promeVersion = [System.Reflection.AssemblyName]::GetAssemblyName($promeDll).Version.ToString()
+          "prome_version=$promeVersion" >> $env:GITHUB_OUTPUT
 
       - name: Build
         shell: pwsh
@@ -102,29 +104,29 @@ jobs:
         run: |
           $dist = "${{ runner.temp }}\dist"
           $zipUrl = "https://github.com/${{ github.repository }}/releases/latest/download/latest.zip"
-          $manifest = @(
-            [ordered]@{
-              Author = "${{ env.AUTHOR }}"
-              Name = "${{ env.NAME }}"
-              Punchline = "${{ env.PUNCHLINE }}"
-              Description = "${{ env.DESCRIPTION }}"
-              InternalName = "${{ env.INTERNAL_NAME }}"
-              AssemblyVersion = "${{ steps.version.outputs.version }}"
-              ApplicableVersion = "any"
-              DalamudApiLevel = [int]"${{ env.DALAMUD_API_LEVEL }}"
-              IsHide = $false
-              IconUrl = "${{ env.ICON_URL }}"
-              DownloadLinkInstall = $zipUrl
-              DownloadLinkUpdate = $zipUrl
-              DownloadCount = 114514
-              LastUpdate = 0
-              Tags = ConvertFrom-Json '${{ env.TAGS }}'
-            }
-          )
+          $zipPath = "$dist\latest.zip"
+          $sha256 = (Get-FileHash -Algorithm SHA256 -Path $zipPath).Hash.ToLowerInvariant()
 
-          $manifest |
-            ConvertTo-Json -Depth 8 |
-            Set-Content -Path "$dist\repo.json" -Encoding UTF8
+          $manifest = [ordered]@{
+            author = "${{ env.ACR_AUTHOR }}"
+            version = "${{ steps.version.outputs.version }}"
+            description = "${{ env.ACR_DESCRIPTION }}"
+            supportedJobs = @(
+              [ordered]@{
+                job = "${{ env.ACR_JOB }}"
+                contentScope = "${{ env.ACR_CONTENT_SCOPE }}"
+              }
+            )
+            apiVersion = [int]"${{ env.ACR_API_VERSION }}"
+            referencePromeVersion = "${{ steps.references.outputs.prome_version }}"
+            downloadUrl = $zipUrl
+            sha256 = $sha256
+          }
+
+          $json = $manifest | ConvertTo-Json -Depth 8
+          Set-Content -Path "$dist\repo.json" -Value $json -Encoding UTF8
+
+          $json
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -144,3 +146,11 @@ jobs:
           files: |
             ${{ runner.temp }}\dist\latest.zip
             ${{ runner.temp }}\dist\repo.json
+
+      - name: Publish stable download branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: release
+          publish_dir: ${{ runner.temp }}\dist
+          force_orphan: true
