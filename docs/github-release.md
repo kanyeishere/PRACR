@@ -257,6 +257,7 @@ on:
       apiVersion = [int]"15"                     # PromeRotation API 版本
       referencePromeVersion = "上一步读取的版本"
       downloadUrl = "https://raw.githubusercontent.com/${{ github.repository }}/release/latest.zip"
+      sourceRepositoryUrl = "https://github.com/kanyeishere/PRACR"
       sha256 = $sha256
     }
 
@@ -318,6 +319,7 @@ on:
   "apiVersion": 15,
   "referencePromeVersion": "1.0.0.0",
   "downloadUrl": "https://raw.githubusercontent.com/你的用户名/你的仓库/release/latest.zip",
+  "sourceRepositoryUrl": "https://github.com/kanyeishere/PRACR",
   "sha256": "abcdef..."
 }
 ```
@@ -335,6 +337,7 @@ on:
 | `apiVersion` | PromeRotation API 版本 |
 | `referencePromeVersion` | 此 ACR 所基于的 PromeRotation 版本 |
 | `downloadUrl` | `latest.zip` 的下载地址 |
+| `sourceRepositoryUrl` | ACR 源码仓库地址 |
 | `sha256` | `latest.zip` 的文件哈希 |
 
 ---
@@ -512,6 +515,7 @@ jobs:
             apiVersion = [int]"${{ env.ACR_API_VERSION }}"
             referencePromeVersion = "${{ steps.references.outputs.prome_version }}"
             downloadUrl = "https://raw.githubusercontent.com/${{ github.repository }}/release/latest.zip"
+            sourceRepositoryUrl = "https://github.com/kanyeishere/PRACR"
             sha256 = $sha256
           }
           $json = $manifest | ConvertTo-Json -Depth 8
@@ -545,5 +549,4 @@ jobs:
           publish_dir: ${{ runner.temp }}\dist
           force_orphan: true
 ```
-
 

@@ -145,6 +145,7 @@ jobs:
             apiVersion = [int]"${{ env.ACR_API_VERSION }}"
             referencePromeVersion = "${{ steps.references.outputs.prome_version }}"
             downloadUrl = $zipUrl
+            sourceRepositoryUrl = "https://github.com/kanyeishere/PRACR"
             sha256 = $sha256
           }
 
