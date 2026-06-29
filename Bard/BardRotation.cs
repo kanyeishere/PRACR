@@ -42,6 +42,7 @@ public class BardRotation : IRotation
         _offGcdResolvers.Add(new BardSongAbility());
         _offGcdResolvers.Add(new BardHeartBreakOffGcd());
 
+        _gcdResolvers.Add(new BurstingAfterDeathSequence());
         _gcdResolvers.Add(new BardBlastArrowMaxGcd());
         _gcdResolvers.Add(new BardIronJawsGcd());
         _gcdResolvers.Add(new BardApexMaxGcd());
