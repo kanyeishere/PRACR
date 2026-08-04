@@ -234,6 +234,12 @@ public class BardRotation : IRotation
             ImGui.EndTabItem();
         }
 
+        if (ImGui.BeginTabItem("调试"))
+        {
+            BardBattleDebugUI.Draw();
+            ImGui.EndTabItem();
+        }
+
         ImGui.EndTabBar();
     }
 
