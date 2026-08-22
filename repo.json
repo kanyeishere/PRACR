@@ -1,0 +1,20 @@
+{
+  "author": "Wotou",
+  "version": "1.0.1.8",
+  "description": "一个简单的只支持高难的ACR， DNC暂时不可使用",
+  "supportedJobs": [
+    {
+      "job": "BRD",
+      "contentScope": "Unspecified"
+    },
+    {
+      "job": "DNC",
+      "contentScope": "Unspecified"
+    }
+  ],
+  "apiVersion": 15,
+  "referencePromeVersion": "1.5.9.2",
+  "downloadUrl": "https://raw.githubusercontent.com/kanyeishere/PRACR/release/latest.zip",
+  "sourceRepositoryUrl": "https://github.com/kanyeishere/PRACR",
+  "sha256": "cb4fddf47bbc3d04bf0920cedceaf6bd8f464a1b9b66a08177a486fbe21c4b30"
+}
